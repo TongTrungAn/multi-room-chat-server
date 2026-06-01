@@ -27,6 +27,29 @@ static void send_to_client(Client *client, const char *format, ...)
 
     send_all(client->socket_fd, buffer, strlen(buffer));
 }
+static void clean_token(char *str)
+{
+    if (str == NULL)
+    {
+        return;
+    }
+
+    str[strcspn(str, "\r\n")] = '\0';
+
+    int write_index = 0;
+
+    for (int read_index = 0; str[read_index] != '\0'; read_index++)
+    {
+        unsigned char c = (unsigned char)str[read_index];
+
+        if (c >= 32 && c <= 126)
+        {
+            str[write_index++] = str[read_index];
+        }
+    }
+
+    str[write_index] = '\0';
+}
 
 static int nickname_exists(const char *nickname, Client *current_client)
 {
@@ -242,6 +265,7 @@ static int process_command(Client *client, char *buffer)
             send_to_client(client, "[ERROR] Usage: /nick <name>\n");
             return 1;
         }
+        clean_token(new_name);
 
         if (nickname_exists(new_name, client))
         {
@@ -264,11 +288,13 @@ static int process_command(Client *client, char *buffer)
 
         memset(new_room, 0, sizeof(new_room));
 
-        if (sscanf(buffer + 6, "%31s", new_room) != 1)
+       if (sscanf(buffer + 6, "%31s", new_room) != 1)
         {
             send_to_client(client, "[ERROR] Usage: /join <room>\n");
             return 1;
         }
+
+        clean_token(new_room);
 
         pthread_mutex_lock(&clients_mutex);
         snprintf(client->room, MAX_ROOM_LEN, "%s", new_room);
@@ -279,8 +305,9 @@ static int process_command(Client *client, char *buffer)
         snprintf(
             message,
             sizeof(message),
-            "%s has joined this room.",
-            client->nickname);
+            "%s has joined room [%s].",
+            client->nickname,
+            new_room);
 
         broadcast_system_to_room(client, message);
 
@@ -324,6 +351,9 @@ static int process_command(Client *client, char *buffer)
 
         char *target_name = content;
         char *message_text = space + 1;
+
+        clean_token(target_name);
+        clean_token(message_text);
 
         if (is_empty_string(target_name) || is_empty_string(message_text))
         {
@@ -387,6 +417,7 @@ void *client_thread(void *arg)
         }
 
         buffer[bytes_received] = '\0';
+        buffer[strcspn(buffer, "\r\n")] = '\0';
 
         int should_continue = process_command(client, buffer);
 

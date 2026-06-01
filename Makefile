@@ -10,10 +10,19 @@ SERVER_SRC = \
 
 SERVER_BIN = server
 
-all: $(SERVER_BIN)
+CLIENT_SRC = \
+	src/client/client.c \
+	src/client/parser.c
+
+CLIENT_BIN = client
+
+all: $(SERVER_BIN) $(CLIENT_BIN)
 
 $(SERVER_BIN): $(SERVER_SRC)
 	$(CC) $(CFLAGS) $(SERVER_SRC) -o $(SERVER_BIN)
 
+$(CLIENT_BIN): $(CLIENT_SRC)
+	$(CC) $(CFLAGS) $(CLIENT_SRC) -o $(CLIENT_BIN)
+
 clean:
-	rm -f $(SERVER_BIN)
+	rm -f $(SERVER_BIN) $(CLIENT_BIN)
