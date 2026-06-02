@@ -5,15 +5,13 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
-#include "parser.h"
-
 #define BUFFER_SIZE 1024
 
 int client_socket;
 
 void *receive_messages(void *arg)
 {
-    (void)arg; 
+    (void)arg;
     char buffer[BUFFER_SIZE];
 
     while (1)
@@ -28,6 +26,8 @@ void *receive_messages(void *arg)
             close(client_socket);
             exit(0);
         }
+
+        buffer[bytes_received] = '\0';
 
         printf("\n%s\n", buffer);
         printf("> ");
@@ -100,12 +100,6 @@ int main(int argc, char *argv[])
 
         if (strlen(input) == 0)
             continue;
-
-        if (!validate_command(input))
-        {
-            printf("[ERROR] Invalid command format\n");
-            continue;
-        }
 
         send(client_socket, input, strlen(input), 0);
 

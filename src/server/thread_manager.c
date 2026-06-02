@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <ctype.h>
 #include <sys/socket.h>
 
 #include "../../include/server.h"
@@ -49,6 +50,82 @@ static void clean_token(char *str)
     }
 
     str[write_index] = '\0';
+}
+
+static void normalize_input(char *str)
+{
+    if (str == NULL)
+    {
+        return;
+    }
+
+    str[strcspn(str, "\r\n")] = '\0';
+
+    int write_index = 0;
+
+    for (int read_index = 0; str[read_index] != '\0'; read_index++)
+    {
+        unsigned char c = (unsigned char)str[read_index];
+
+        if (c >= 32 && c <= 126)
+        {
+            str[write_index++] = str[read_index];
+        }
+    }
+
+    str[write_index] = '\0';
+
+    char *start = str;
+    while (*start != '\0' && isspace((unsigned char)*start))
+    {
+        start++;
+    }
+
+    if (start != str)
+    {
+        memmove(str, start, strlen(start) + 1);
+    }
+
+    int len = strlen(str);
+    while (len > 0 && isspace((unsigned char)str[len - 1]))
+    {
+        str[len - 1] = '\0';
+        len--;
+    }
+}
+
+static int command_has_no_argument(const char *buffer, const char *command)
+{
+    size_t len = strlen(command);
+
+    if (strncmp(buffer, command, len) != 0)
+    {
+        return 0;
+    }
+
+    return buffer[len] == '\0' || isspace((unsigned char)buffer[len]);
+}
+
+static int command_has_argument(const char *buffer, const char *command)
+{
+    size_t len = strlen(command);
+
+    if (strncmp(buffer, command, len) != 0)
+    {
+        return 0;
+    }
+
+    return buffer[len] != '\0' && isspace((unsigned char)buffer[len]);
+}
+
+static char *skip_spaces(char *str)
+{
+    while (str != NULL && *str != '\0' && isspace((unsigned char)*str))
+    {
+        str++;
+    }
+
+    return str;
 }
 
 static int nickname_exists(const char *nickname, Client *current_client)
@@ -247,25 +324,33 @@ static void private_message(Client *sender, const char *target_name, const char 
 
 static int process_command(Client *client, char *buffer)
 {
-    trim_newline(buffer);
+    normalize_input(buffer);
 
     if (is_empty_string(buffer))
     {
         return 1;
     }
 
-    if (strncmp(buffer, "/nick ", 6) == 0)
+    if (command_has_argument(buffer, "/nick"))
     {
         char new_name[MAX_NAME_LEN];
+        char *argument = skip_spaces(buffer + strlen("/nick"));
 
         memset(new_name, 0, sizeof(new_name));
 
-        if (sscanf(buffer + 6, "%31s", new_name) != 1)
+        if (sscanf(argument, "%31s", new_name) != 1)
         {
             send_to_client(client, "[ERROR] Usage: /nick <name>\n");
             return 1;
         }
+
         clean_token(new_name);
+
+        if (is_empty_string(new_name))
+        {
+            send_to_client(client, "[ERROR] Usage: /nick <name>\n");
+            return 1;
+        }
 
         if (nickname_exists(new_name, client))
         {
@@ -281,20 +366,27 @@ static int process_command(Client *client, char *buffer)
         return 1;
     }
 
-    if (strncmp(buffer, "/join ", 6) == 0)
+    if (command_has_argument(buffer, "/join"))
     {
         char new_room[MAX_ROOM_LEN];
         char message[BUFFER_SIZE];
+        char *argument = skip_spaces(buffer + strlen("/join"));
 
         memset(new_room, 0, sizeof(new_room));
 
-       if (sscanf(buffer + 6, "%31s", new_room) != 1)
+        if (sscanf(argument, "%31s", new_room) != 1)
         {
             send_to_client(client, "[ERROR] Usage: /join <room>\n");
             return 1;
         }
 
         clean_token(new_room);
+
+        if (is_empty_string(new_room))
+        {
+            send_to_client(client, "[ERROR] Usage: /join <room>\n");
+            return 1;
+        }
 
         pthread_mutex_lock(&clients_mutex);
         snprintf(client->room, MAX_ROOM_LEN, "%s", new_room);
@@ -314,7 +406,7 @@ static int process_command(Client *client, char *buffer)
         return 1;
     }
 
-    if (strcmp(buffer, "/leave") == 0)
+    if (command_has_no_argument(buffer, "/leave"))
     {
         pthread_mutex_lock(&clients_mutex);
         snprintf(client->room, MAX_ROOM_LEN, "lobby");
@@ -324,21 +416,21 @@ static int process_command(Client *client, char *buffer)
         return 1;
     }
 
-    if (strcmp(buffer, "/list") == 0)
+    if (command_has_no_argument(buffer, "/list"))
     {
         list_rooms(client);
         return 1;
     }
 
-    if (strcmp(buffer, "/who") == 0)
+    if (command_has_no_argument(buffer, "/who"))
     {
         show_users_in_room(client);
         return 1;
     }
 
-    if (strncmp(buffer, "/msg ", 5) == 0)
+    if (command_has_argument(buffer, "/msg"))
     {
-        char *content = buffer + 5;
+        char *content = skip_spaces(buffer + strlen("/msg"));
         char *space = strchr(content, ' ');
 
         if (space == NULL)
@@ -350,7 +442,7 @@ static int process_command(Client *client, char *buffer)
         *space = '\0';
 
         char *target_name = content;
-        char *message_text = space + 1;
+        char *message_text = skip_spaces(space + 1);
 
         clean_token(target_name);
         clean_token(message_text);
@@ -365,7 +457,7 @@ static int process_command(Client *client, char *buffer)
         return 1;
     }
 
-    if (strcmp(buffer, "/quit") == 0)
+    if (command_has_no_argument(buffer, "/quit"))
     {
         send_to_client(client, "[SERVER] Goodbye!\n");
         return 0;
@@ -373,7 +465,7 @@ static int process_command(Client *client, char *buffer)
 
     if (buffer[0] == '/')
     {
-        send_to_client(client, "[ERROR] Unknown command.\n");
+        send_to_client(client, "[ERROR] Unknown command. You typed: [%s]\n", buffer);
         return 1;
     }
 
